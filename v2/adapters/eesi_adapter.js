@@ -33,7 +33,7 @@ const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 
 const ORCH_SR = parseInt(process.env.WIRE_SAMPLE_RATE, 10) || 48000;
-const NUR_IN_SR = 16000;
+const NUR_IN_SR = 16000;          // what the gateway's VAD and STT expect
 const NUR_OUT_SR = 24000;
 const UPLINK_MS = 40; // what the gateway expects per append
 const ORCH_10MS = Math.floor(ORCH_SR * 0.01);
@@ -143,13 +143,14 @@ let orchPC, orchSource, orchSink, orchWS, nurWS;
 let uplink = Buffer.alloc(0);          // 48 kHz PCM16 from the examiner
 let playout = [];                      // 24 kHz PCM16 chunks Nur has sent
 let playoutBytes = 0;
-let upCarry = null, downCarry = 0;
+let downCarry = 0;
 let timers = [];
-const decimator = new Decimator(3);    // 48 kHz → 16 kHz
+const decimator = new Decimator(ORCH_SR / NUR_IN_SR);
 const events = [];
 const transcript = [];
 let currentResponse = null;
 let received = 0, rendered = 0, discarded = 0;
+const perResponse = new Map();   // response id -> samples, so every reply gets an onset
 let started = Date.now();
 const nowMs = () => Date.now() - started;
 
@@ -281,7 +282,14 @@ function handleNurEvent(event) {
     const pcm = Buffer.from(event.delta || event.audio || '', 'base64');
     if (!pcm.length || pcm.length % 2) return;
     if (rate !== NUR_OUT_SR) { log('unexpected output rate', rate); return; }
-    if (received === 0) record('audio.first', { response_id: currentResponse });
+    // One onset per reply, not per session: a benchmark reads the gap between
+    // the examiner finishing and each of Nur's answers starting, so a counter
+    // that only fires once loses every turn after the first. A backchannel is
+    // audio but not an answer, so it never opens a reply.
+    const id = kind === 'eesi.backchannel' ? `bc:${event.id || received}` : (currentResponse || 'unknown');
+    const seen = perResponse.get(id) || 0;
+    if (seen === 0 && kind !== 'eesi.backchannel') record('audio.first', { response_id: id });
+    perResponse.set(id, seen + pcm.length / 2);
     received += pcm.length / 2;
     playout.push(pcm);
     playoutBytes += pcm.length;
