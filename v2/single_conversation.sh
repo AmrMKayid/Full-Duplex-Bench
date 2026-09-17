@@ -156,6 +156,10 @@ done
 
 # Export recording dir for child processes (orchestrator, adapters)
 export RECORD_DIR
+# orchestrator.js reads SIGNAL_PORT from the environment and ignores its --port
+# argument, so without this it binds the 9100 default while the adapters dial
+# the random port chosen above and every connection is refused.
+export SIGNAL_PORT
 
 # Prepare Role A prefill (USER role) and keep system prompt separate
 PREFILL_A=""

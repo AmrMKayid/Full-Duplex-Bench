@@ -189,17 +189,12 @@ async function connectOpenAI() {
       };
     }
 
-    // Send initial session.update
-    const msg = {
-      type: 'session.update',
-      session: {
-        instructions: SYSTEM_PROMPT,
-        voice: VOICE,
-        turn_detection: turn_detection_config,
-        input_audio_transcription: undefined, // add if you want live transcripts
-      }
-    };
-    safeSendDC(msg);
+    // Send initial session.update. The GA session object requires `type` and
+    // nests voice and turn detection under `audio`; the old flat form is
+    // rejected with "Missing required parameter: 'session.type'".
+    const session = { type: 'realtime', instructions: SYSTEM_PROMPT, audio: { output: { voice: VOICE } } };
+    if (turn_detection_config) session.audio.input = { turn_detection: turn_detection_config };
+    safeSendDC({ type: 'session.update', session });
   };
   let connectionStartTime = Date.now();
 
@@ -228,7 +223,8 @@ async function connectOpenAI() {
   await aiPC.setLocalDescription(offer);
   await waitForIceGatheringComplete(aiPC);
 
-  const sdpAnswer = await postSDP(`https://api.openai.com/v1/realtime?model=${encodeURIComponent(MODEL)}`, EPHEMERAL_KEY, aiPC.localDescription.sdp);
+  // The WebRTC SDP exchange moved from /v1/realtime to /v1/realtime/calls.
+  const sdpAnswer = await postSDP(`https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(MODEL)}`, EPHEMERAL_KEY, aiPC.localDescription.sdp);
   await aiPC.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
   console.log(`[Adapter-${ROLE}] OpenAI answer applied.`);
 }
@@ -372,7 +368,7 @@ function sendPrefillHistory() {
   if (!turns.length) {
     prefillSent = true;
     if (AUTOSTART) {
-      safeSendDC({ type: 'response.create', response: { modalities: ['audio', 'text'] } });
+      safeSendDC({ type: 'response.create', response: { output_modalities: ['audio'] } });
     }
     return;
   }
@@ -391,6 +387,6 @@ function sendPrefillHistory() {
   }
   prefillSent = true;
   if (AUTOSTART) {
-    safeSendDC({ type: 'response.create', response: { modalities: ['audio', 'text'] } });
+    safeSendDC({ type: 'response.create', response: { output_modalities: ['audio'] } });
   }
 }

@@ -6,6 +6,7 @@
  *
  * Endpoints
  *   POST /session  -> { client_secret: { value, expires_at }, id, ... }
+ *                    (minted via POST /v1/realtime/client_secrets)
  *   GET  /healthz  -> 200 OK
  *
  * Env
@@ -59,17 +60,22 @@ app.post('/session', async (req, res) => {
     const body = req.body || {};
     const model = body.model || DEFAULT_MODEL;
 
-    // Only include fields the API expects. Voice/instructions/turn_detection are safe to pass here,
-    // but you can also set them later via the data channel `session.update`.
-    const payload = {
-      model,
-    };
-    if (body.voice) payload.voice = body.voice;
-    if (body.instructions) payload.instructions = body.instructions;
-    if (body.turn_detection) payload.turn_detection = body.turn_detection; // e.g., { type: 'server_vad' }
-    if (body.input_audio_transcription) payload.input_audio_transcription = body.input_audio_transcription;
+    // POST /v1/realtime/sessions was removed; the current endpoint is
+    // /v1/realtime/client_secrets and it nests voice and turn detection under
+    // session.audio instead of taking them flat.
+    const session = { type: 'realtime', model };
+    if (body.instructions) session.instructions = body.instructions;
+    const audio = {};
+    if (body.turn_detection || body.input_audio_transcription) {
+      audio.input = {};
+      if (body.turn_detection) audio.input.turn_detection = body.turn_detection;
+      if (body.input_audio_transcription) audio.input.transcription = body.input_audio_transcription;
+    }
+    if (body.voice) audio.output = { voice: body.voice };
+    if (Object.keys(audio).length) session.audio = audio;
+    const payload = { session };
 
-    const r = await fetch('https://api.openai.com/v1/realtime/sessions', {
+    const r = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENAI_KEY}`,
@@ -80,13 +86,17 @@ app.post('/session', async (req, res) => {
 
     if (!r.ok) {
       const errText = await r.text().catch(() => '');
-      console.error('[token-server] OpenAI /realtime/sessions error:', r.status, errText);
+      console.error('[token-server] OpenAI /realtime/client_secrets error:', r.status, errText);
       return res.status(500).json({ error: 'failed_to_create_session', status: r.status, detail: errText });
     }
 
     const json = await r.json();
-    // The client should use json.client_secret.value as its Bearer token for the SDP exchange.
-    res.json(json);
+    // The new endpoint returns { value, expires_at, session }. Keep answering in
+    // the old { client_secret: { value } } shape so adapters need no change.
+    res.json({
+      ...(json.session || {}),
+      client_secret: { value: json.value, expires_at: json.expires_at },
+    });
   } catch (e) {
     console.error('[token-server] /session exception:', e);
     res.status(500).json({ error: 'exception', detail: String(e) });

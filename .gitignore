@@ -50,3 +50,4 @@ Thumbs.db
 # V2 Architecture
 v2/node_modules/
 v2/outputs/
+v2/outputs-*/

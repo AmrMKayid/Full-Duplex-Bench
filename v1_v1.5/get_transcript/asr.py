@@ -10,7 +10,16 @@ from tqdm import tqdm
 MODEL_NAME = ""
 
 
-def get_time_aligned_transcription(data_path, task, audio_name="output.wav"):
+def pick_device(name):
+    """CUDA when there is one; this benchmark also has to run on a laptop."""
+    import torch
+
+    if name != "auto":
+        return name
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def get_time_aligned_transcription(data_path, task, audio_name="output.wav", device="auto"):
     # Collect all matching audio files under the root directory
     audio_paths = sorted(glob(f"{data_path}/*/{MODEL_NAME}{audio_name}"))
 
@@ -18,9 +27,11 @@ def get_time_aligned_transcription(data_path, task, audio_name="output.wav"):
     json_name = audio_name.rsplit(".", 1)[0] + ".json"
 
     # Load the pretrained NeMo ASR model and move to GPU
+    device = pick_device(device)
     asr_model = nemo_asr.models.ASRModel.from_pretrained(
         model_name="nvidia/parakeet-tdt-0.6b-v2"
-    ).cuda()
+    ).to(device)
+    asr_model.eval()
 
     for audio_path in tqdm(audio_paths):
         print(audio_path)
@@ -113,6 +124,14 @@ if __name__ == "__main__":
              "Use 'clean_input.wav', 'clean_output.wav', or 'input.wav' for v1.5. "
              "JSON output filename mirrors this (e.g. 'clean_output.wav' -> 'clean_output.json').",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="auto (cuda when present, else cpu), or an explicit torch device.",
+    )
     args = parser.parse_args()
 
-    get_time_aligned_transcription(args.root_dir, args.task, args.audio_name)
+    get_time_aligned_transcription(
+        args.root_dir, args.task, args.audio_name, args.device
+    )
